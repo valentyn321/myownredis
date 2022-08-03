@@ -115,6 +115,45 @@ class Server(object):
         self._protocol = ProtocolHandler()
         self._kv = {}
 
+        self._commands = self.get_commands()
+
+    def get(self, key):
+        return self._kv.get(key)
+
+    def set(self, key, value):
+        self._kv[key] = value
+        return 1
+
+    def delete(self, key):
+        if key in self._kv[key]:
+            del self._kv[key]
+            return 1
+        return 0
+
+    def flush(self):
+        kvlen = len(self._kv)
+        self._kv.clear()
+        return kvlen
+
+    def mget(self, *keys):
+        return [self._kv.get(key) for key in keys]
+
+    def mset(self, *items):
+        data = zip(items[::2], items[1::2])
+        for key, value in data:
+            self._kv[key] = value
+        return len(data)
+
+    def get_commands(self):
+        return {
+            "GET": self.get,
+            "SET": self.set,
+            "DELETE": self.delete,
+            "FLUSH": self.flush,
+            "MGET": self.mget,
+            "MSET": self.mset,
+        }
+
     def connection_handler(self, connection, address):
         # Convert a socket object into file-like object
         socket_file = connection.makefile("rwb")
@@ -136,7 +175,20 @@ class Server(object):
     def get_response(self, data):
         """Upacks the data sent by the client, execute the
         command he specified and pass back the return value"""
-        pass
+        if not isinstance(data, list):
+            try:
+                data = data.split()
+            except:
+                raise CommandError("Request should be string or list format")
+
+        if not data:
+            raise CommandError("Missing command.")
+
+        command = data[0].upper()
+        if command not in self._commands:
+            raise CommandError("Command is not recognized: %s" % command)
+
+        return self._commands[command](*data[1:])
 
     def run(self):
         self._server.serve_forever()
