@@ -1,3 +1,4 @@
+from cgitb import handler
 from gevent import socket
 from gevent.pool import Pool
 from gevent.server import StreamServer
@@ -79,21 +80,22 @@ class ProtocolHandler(object):
         socket_file.write(buf.getvalue())
 
     def _write(self, buf, data):
+
         if isinstance(data, str):
             data = data.encode("utf-8")
 
         if isinstance(data, bytes):
-            buf.write("$%s\r\n%s\r\n" % (len(data), data))
+            buf.write(("$%s\r\n%s\r\n" % (len(data), data)).encode())
         elif isinstance(data, Error):
             buf.write("-%s\r\n" % Error.message)
         elif isinstance(data, int):
             buf.write(":%s\r\n" % data)
         elif isinstance(data, (list, tuple)):
-            buf.write("*%s\r\n" % len(data))
+            buf.write(("*%s\r\n" % len(data)).encode())
             for item in data:
                 self._write(buf, item)
         elif isinstance(data, dict):
-            buf.write("%%%s\r\n" % len(data))
+            buf.write(("%%%s\r\n" % len(data)).encode())
             for key in data:
                 self._write(buf, key)
                 self._wite(buf, data[key])
@@ -192,3 +194,43 @@ class Server(object):
 
     def run(self):
         self._server.serve_forever()
+
+
+class Client(object):
+    def __init__(self, host="127.0.0.1", port=31337):
+        self._protocol = ProtocolHandler()
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.connect((host, port))
+        self._fh = self._socket.makefile("rwb")
+
+    def execute(self, *args):
+        self._protocol.write_response(self._fh, args)
+        response = self._protocol.handle_request(self._fh)
+        if isinstance(response, Error):
+            raise CommandError(response.message)
+        return response
+
+    def get(self, key):
+        return self.execute("GET", key)
+
+    def set(self, key, value):
+        return self.execute("SET", key, value)
+
+    def delete(self, key):
+        return self.execute("DELETE", key)
+
+    def flush(self):
+        return self.execute("FLUSH")
+
+    def mget(self, *keys):
+        return self.execute("MGET", *keys)
+
+    def mset(self, *items):
+        return self.execute("MSET", *items)
+
+
+if __name__ == "__main__":
+    from gevent import monkey
+
+    monkey.patch_all()
+    Server().run()
